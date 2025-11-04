@@ -1,0 +1,128 @@
+### **Data Mapping for Bronze Layer**
+
+This data mapping document outlines the one-to-one ingestion of data from the source `credit_card` database into the BigQuery Bronze layer. The target tables are prefixed with `bz_` and include additional metadata columns to track data lineage and load times. All transformations are direct 1-1 mappings to preserve the raw data integrity.
+
+| Target Layer | Target Table | Target Field | BigQuery Data Type | Source Layer | Source Table | Source Field | Source Data Type | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Bronze | bz_applicants | applicant_id | INT64 | Source | Applicants | applicant_id | INT | 1-1 Mapping |
+| Bronze | bz_applicants | full_name | STRING | Source | Applicants | full_name | VARCHAR(100) | 1-1 Mapping |
+| Bronze | bz_applicants | email | STRING | Source | Applicants | email | VARCHAR(100) | 1-1 Mapping |
+| Bronze | bz_applicants | phone_number | STRING | Source | Applicants | phone_number | VARCHAR(15) | 1-1 Mapping |
+| Bronze | bz_applicants | dob | DATE | Source | Applicants | dob | DATE | 1-1 Mapping |
+| Bronze | bz_applicants | ssn | STRING | Source | Applicants | ssn | VARCHAR(11) | 1-1 Mapping |
+| Bronze | bz_applicants | channel | STRING | Source | Applicants | channel | VARCHAR(50) | 1-1 Mapping |
+| Bronze | bz_applicants | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_applicants | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_applicants | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_applications | application_id | INT64 | Source | Applications | application_id | INT | 1-1 Mapping |
+| Bronze | bz_applications | applicant_id | INT64 | Source | Applications | applicant_id | INT | 1-1 Mapping |
+| Bronze | bz_applications | card_product_id | INT64 | Source | Applications | card_product_id | INT | 1-1 Mapping |
+| Bronze | bz_applications | application_date | DATE | Source | Applications | application_date | DATE | 1-1 Mapping |
+| Bronze | bz_applications | status | STRING | Source | Applications | status | VARCHAR(30) | 1-1 Mapping |
+| Bronze | bz_applications | approval_date | DATE | Source | Applications | approval_date | DATE | 1-1 Mapping |
+| Bronze | bz_applications | rejection_reason | STRING | Source | Applications | rejection_reason | VARCHAR(255) | 1-1 Mapping |
+| Bronze | bz_applications | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_applications | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_applications | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_card_products | card_product_id | INT64 | Source | Card_Products | card_product_id | INT | 1-1 Mapping |
+| Bronze | bz_card_products | card_name | STRING | Source | Card_Products | card_name | VARCHAR(100) | 1-1 Mapping |
+| Bronze | bz_card_products | category | STRING | Source | Card_Products | category | VARCHAR(50) | 1-1 Mapping |
+| Bronze | bz_card_products | interest_rate | FLOAT64 | Source | Card_Products | interest_rate | FLOAT | 1-1 Mapping |
+| Bronze | bz_card_products | annual_fee | FLOAT64 | Source | Card_Products | annual_fee | FLOAT | 1-1 Mapping |
+| Bronze | bz_card_products | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_card_products | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_card_products | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_credit_scores | credit_score_id | INT64 | Source | Credit_Scores | credit_score_id | INT | 1-1 Mapping |
+| Bronze | bz_credit_scores | applicant_id | INT64 | Source | Credit_Scores | applicant_id | INT | 1-1 Mapping |
+| Bronze | bz_credit_scores | score | INT64 | Source | Credit_Scores | score | INT | 1-1 Mapping |
+| Bronze | bz_credit_scores | score_date | DATE | Source | Credit_Scores | score_date | DATE | 1-1 Mapping |
+| Bronze | bz_credit_scores | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_credit_scores | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_credit_scores | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_document_submissions | document_id | INT64 | Source | Document_Submissions | document_id | INT | 1-1 Mapping |
+| Bronze | bz_document_submissions | application_id | INT64 | Source | Document_Submissions | application_id | INT | 1-1 Mapping |
+| Bronze | bz_document_submissions | document_type | STRING | Source | Document_Submissions | document_type | VARCHAR(50) | 1-1 Mapping |
+| Bronze | bz_document_submissions | upload_date | DATE | Source | Document_Submissions | upload_date | DATE | 1-1 Mapping |
+| Bronze | bz_document_submissions | verified_flag | BOOL | Source | Document_Submissions | verified_flag | BOOLEAN | 1-1 Mapping |
+| Bronze | bz_document_submissions | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_document_submissions | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_document_submissions | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_verification_results | verification_id | INT64 | Source | Verification_Results | verification_id | INT | 1-1 Mapping |
+| Bronze | bz_verification_results | application_id | INT64 | Source | Verification_Results | application_id | INT | 1-1 Mapping |
+| Bronze | bz_verification_results | verification_type | STRING | Source | Verification_Results | verification_type | VARCHAR(50) | 1-1 Mapping |
+| Bronze | bz_verification_results | result | STRING | Source | Verification_Results | result | VARCHAR(30) | 1-1 Mapping |
+| Bronze | bz_verification_results | verified_on | DATE | Source | Verification_Results | verified_on | DATE | 1-1 Mapping |
+| Bronze | bz_verification_results | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_verification_results | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_verification_results | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_underwriting_decisions | decision_id | INT64 | Source | Underwriting_Decisions | decision_id | INT | 1-1 Mapping |
+| Bronze | bz_underwriting_decisions | application_id | INT64 | Source | Underwriting_Decisions | application_id | INT | 1-1 Mapping |
+| Bronze | bz_underwriting_decisions | decision | STRING | Source | Underwriting_Decisions | decision | VARCHAR(30) | 1-1 Mapping |
+| Bronze | bz_underwriting_decisions | decision_reason | STRING | Source | Underwriting_Decisions | decision_reason | VARCHAR(255) | 1-1 Mapping |
+| Bronze | bz_underwriting_decisions | decision_date | DATE | Source | Underwriting_Decisions | decision_date | DATE | 1-1 Mapping |
+| Bronze | bz_underwriting_decisions | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_underwriting_decisions | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_underwriting_decisions | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_campaigns | campaign_id | INT64 | Source | Campaigns | campaign_id | INT | 1-1 Mapping |
+| Bronze | bz_campaigns | campaign_name | STRING | Source | Campaigns | campaign_name | VARCHAR(100) | 1-1 Mapping |
+| Bronze | bz_campaigns | channel | STRING | Source | Campaigns | channel | VARCHAR(50) | 1-1 Mapping |
+| Bronze | bz_campaigns | start_date | DATE | Source | Campaigns | start_date | DATE | 1-1 Mapping |
+| Bronze | bz_campaigns | end_date | DATE | Source | Campaigns | end_date | DATE | 1-1 Mapping |
+| Bronze | bz_campaigns | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_campaigns | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_campaigns | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_application_campaigns | app_campaign_id | INT64 | Source | Application_Campaigns | app_campaign_id | INT | 1-1 Mapping |
+| Bronze | bz_application_campaigns | application_id | INT64 | Source | Application_Campaigns | application_id | INT | 1-1 Mapping |
+| Bronze | bz_application_campaigns | campaign_id | INT64 | Source | Application_Campaigns | campaign_id | INT | 1-1 Mapping |
+| Bronze | bz_application_campaigns | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_application_campaigns | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_application_campaigns | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_activations | activation_id | INT64 | Source | Activations | activation_id | INT | 1-1 Mapping |
+| Bronze | bz_activations | application_id | INT64 | Source | Activations | application_id | INT | 1-1 Mapping |
+| Bronze | bz_activations | activation_date | DATE | Source | Activations | activation_date | DATE | 1-1 Mapping |
+| Bronze | bz_activations | first_transaction_amount | FLOAT64 | Source | Activations | first_transaction_amount | FLOAT | 1-1 Mapping |
+| Bronze | bz_activations | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_activations | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_activations | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_fraud_checks | fraud_check_id | INT64 | Source | Fraud_Checks | fraud_check_id | INT | 1-1 Mapping |
+| Bronze | bz_fraud_checks | application_id | INT64 | Source | Fraud_Checks | application_id | INT | 1-1 Mapping |
+| Bronze | bz_fraud_checks | check_type | STRING | Source | Fraud_Checks | check_type | VARCHAR(50) | 1-1 Mapping |
+| Bronze | bz_fraud_checks | check_result | STRING | Source | Fraud_Checks | check_result | VARCHAR(30) | 1-1 Mapping |
+| Bronze | bz_fraud_checks | check_date | DATE | Source | Fraud_Checks | check_date | DATE | 1-1 Mapping |
+| Bronze | bz_fraud_checks | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_fraud_checks | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_fraud_checks | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_offers | offer_id | INT64 | Source | Offers | offer_id | INT | 1-1 Mapping |
+| Bronze | bz_offers | card_product_id | INT64 | Source | Offers | card_product_id | INT | 1-1 Mapping |
+| Bronze | bz_offers | offer_detail | STRING | Source | Offers | offer_detail | VARCHAR(255) | 1-1 Mapping |
+| Bronze | bz_offers | valid_from | DATE | Source | Offers | valid_from | DATE | 1-1 Mapping |
+| Bronze | bz_offers | valid_to | DATE | Source | Offers | valid_to | DATE | 1-1 Mapping |
+| Bronze | bz_offers | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_offers | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_offers | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_offer_performance | offer_analytics_id | INT64 | Source | Offer_Performance | offer_analytics_id | INT | 1-1 Mapping |
+| Bronze | bz_offer_performance | offer_id | INT64 | Source | Offer_Performance | offer_id | INT | 1-1 Mapping |
+| Bronze | bz_offer_performance | applications_count | INT64 | Source | Offer_Performance | applications_count | INT | 1-1 Mapping |
+| Bronze | bz_offer_performance | activations_count | INT64 | Source | Offer_Performance | activations_count | INT | 1-1 Mapping |
+| Bronze | bz_offer_performance | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_offer_performance | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_offer_performance | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_address_history | address_id | INT64 | Source | Address_History | address_id | INT | 1-1 Mapping |
+| Bronze | bz_address_history | applicant_id | INT64 | Source | Address_History | applicant_id | INT | 1-1 Mapping |
+| Bronze | bz_address_history | address_type | STRING | Source | Address_History | address_type | VARCHAR(50) | 1-1 Mapping |
+| Bronze | bz_address_history | street | STRING | Source | Address_History | street | VARCHAR(100) | 1-1 Mapping |
+| Bronze | bz_address_history | city | STRING | Source | Address_History | city | VARCHAR(50) | 1-1 Mapping |
+| Bronze | bz_address_history | state | STRING | Source | Address_History | state | VARCHAR(50) | 1-1 Mapping |
+| Bronze | bz_address_history | zip | STRING | Source | Address_History | zip | VARCHAR(10) | 1-1 Mapping |
+| Bronze | bz_address_history | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_address_history | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_address_history | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_employment_info | employment_id | INT64 | Source | Employment_Info | employment_id | INT | 1-1 Mapping |
+| Bronze | bz_employment_info | applicant_id | INT64 | Source | Employment_Info | applicant_id | INT | 1-1 Mapping |
+| Bronze | bz_employment_info | employer_name | STRING | Source | Employment_Info | employer_name | VARCHAR(100) | 1-1 Mapping |
+| Bronze | bz_employment_info | job_title | STRING | Source | Employment_Info | job_title | VARCHAR(100) | 1-1 Mapping |
+| Bronze | bz_employment_info | income | FLOAT64 | Source | Employment_Info | income | FLOAT | 1-1 Mapping |
+| Bronze | bz_employment_info | employment_type | STRING | Source | Employment_Info | employment_type | VARCHAR(50) | 1-1 Mapping |
+| Bronze | bz_employment_info | load_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_employment_info | update_timestamp | TIMESTAMP | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |
+| Bronze | bz_employment_info | source_system | STRING | Ingestion Process | N/A | N/A | N/A | Generated during ingestion |

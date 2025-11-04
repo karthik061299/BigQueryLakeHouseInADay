@@ -1,0 +1,414 @@
+Here is the comprehensive physical data model for the Bronze layer, including DDL scripts, a conceptual model diagram, and optimization recommendations, designed for Google BigQuery.
+
+### **Bronze Layer DDL Script**
+
+The following DDL scripts create the physical tables in the `bronze_dataset` on Google BigQuery. Each table mirrors its source structure, includes metadata columns for auditing and lineage, and incorporates BigQuery-specific optimizations like partitioning and clustering.
+
+---
+#### **DDL for Audit Table**
+This table is essential for monitoring and auditing all data ingestion processes into the Bronze layer.
+
+```sql
+-- DDL for Bz_Audit_Log
+CREATE TABLE IF NOT EXISTS Bronze.bz_audit_log (
+    record_id STRING NOT NULL OPTIONS(description="A unique identifier for each audit log entry (e.g., a UUID)."),
+    source_table STRING OPTIONS(description="The name of the source table being loaded (e.g., 'credit_card.Applicants')."),
+    load_timestamp TIMESTAMP NOT NULL OPTIONS(description="The timestamp when the load process began."),
+    processed_by STRING OPTIONS(description="The service or user that executed the load process (e.g., 'Dataflow-Job-XYZ')."),
+    processing_time_seconds FLOAT64 OPTIONS(description="The duration of the load process in seconds."),
+    status STRING OPTIONS(description="The final status of the load (e.g., 'Success', 'Failed')."),
+    rows_inserted INT64 OPTIONS(description="Number of rows inserted during the load."),
+    error_message STRING OPTIONS(description="Error message if the load process failed.")
+)
+PARTITION BY
+  DATE(load_timestamp)
+CLUSTER BY
+  source_table, status
+OPTIONS (
+  partition_expiration_days = 730, 
+  description = "Tracks metadata for each data loading process into the Bronze layer, providing an essential audit trail for data governance and operations.",
+  labels = [('layer', 'bronze'), ('type', 'audit')]
+);
+```
+
+---
+#### **DDL for Source Tables**
+
+```sql
+-- DDL for Bz_Applicants
+CREATE TABLE IF NOT EXISTS Bronze.bz_applicants (
+    applicant_id INT64 NOT NULL,
+    full_name STRING,
+    email STRING,
+    phone_number STRING,
+    dob DATE,
+    ssn STRING,
+    channel STRING,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (applicant_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE(load_timestamp)
+CLUSTER BY
+  applicant_id
+OPTIONS (
+  description = "Stores raw data for each individual applying for a credit card. Contains PII.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Card_Products
+CREATE TABLE IF NOT EXISTS Bronze.bz_card_products (
+    card_product_id INT64 NOT NULL,
+    card_name STRING,
+    category STRING,
+    interest_rate FLOAT64,
+    annual_fee FLOAT64,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (card_product_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE(load_timestamp)
+OPTIONS (
+  description = "Stores raw data for the different credit card products offered.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Applications
+CREATE TABLE IF NOT EXISTS Bronze.bz_applications (
+    application_id INT64 NOT NULL,
+    applicant_id INT64 NOT NULL,
+    card_product_id INT64 NOT NULL,
+    application_date DATE,
+    status STRING,
+    approval_date DATE,
+    rejection_reason STRING,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (application_id) NOT ENFORCED,
+    FOREIGN KEY (applicant_id) REFERENCES Bronze.bz_applicants(applicant_id) NOT ENFORCED,
+    FOREIGN KEY (card_product_id) REFERENCES Bronze.bz_card_products(card_product_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE_TRUNC(application_date, MONTH)
+CLUSTER BY
+  applicant_id, status
+OPTIONS (
+  description = "Stores raw data for each credit card application submitted.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Credit_Scores
+CREATE TABLE IF NOT EXISTS Bronze.bz_credit_scores (
+    credit_score_id INT64 NOT NULL,
+    applicant_id INT64 NOT NULL,
+    score INT64,
+    score_date DATE,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (credit_score_id) NOT ENFORCED,
+    FOREIGN KEY (applicant_id) REFERENCES Bronze.bz_applicants(applicant_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE_TRUNC(score_date, MONTH)
+CLUSTER BY
+  applicant_id
+OPTIONS (
+  description = "Stores raw data of credit scores associated with applicants.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Document_Submissions
+CREATE TABLE IF NOT EXISTS Bronze.bz_document_submissions (
+    document_id INT64 NOT NULL,
+    application_id INT64 NOT NULL,
+    document_type STRING,
+    upload_date DATE,
+    verified_flag BOOL,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (document_id) NOT ENFORCED,
+    FOREIGN KEY (application_id) REFERENCES Bronze.bz_applications(application_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE_TRUNC(upload_date, MONTH)
+CLUSTER BY
+  application_id
+OPTIONS (
+  description = "Tracks documents submitted as part of an application.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Verification_Results
+CREATE TABLE IF NOT EXISTS Bronze.bz_verification_results (
+    verification_id INT64 NOT NULL,
+    application_id INT64 NOT NULL,
+    verification_type STRING,
+    result STRING,
+    verified_on DATE,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (verification_id) NOT ENFORCED,
+    FOREIGN KEY (application_id) REFERENCES Bronze.bz_applications(application_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE_TRUNC(verified_on, MONTH)
+CLUSTER BY
+  application_id, verification_type
+OPTIONS (
+  description = "Stores the results of various verification checks for an application.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Underwriting_Decisions
+CREATE TABLE IF NOT EXISTS Bronze.bz_underwriting_decisions (
+    decision_id INT64 NOT NULL,
+    application_id INT64 NOT NULL,
+    decision STRING,
+    decision_reason STRING,
+    decision_date DATE,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (decision_id) NOT ENFORCED,
+    FOREIGN KEY (application_id) REFERENCES Bronze.bz_applications(application_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE_TRUNC(decision_date, MONTH)
+CLUSTER BY
+  application_id
+OPTIONS (
+  description = "Records the final underwriting decision for an application.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Campaigns
+CREATE TABLE IF NOT EXISTS Bronze.bz_campaigns (
+    campaign_id INT64 NOT NULL,
+    campaign_name STRING,
+    channel STRING,
+    start_date DATE,
+    end_date DATE,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (campaign_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE(load_timestamp)
+OPTIONS (
+  description = "Stores raw data for marketing campaigns.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Application_Campaigns
+CREATE TABLE IF NOT EXISTS Bronze.bz_application_campaigns (
+    app_campaign_id INT64 NOT NULL,
+    application_id INT64 NOT NULL,
+    campaign_id INT64 NOT NULL,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (app_campaign_id) NOT ENFORCED,
+    FOREIGN KEY (application_id) REFERENCES Bronze.bz_applications(application_id) NOT ENFORCED,
+    FOREIGN KEY (campaign_id) REFERENCES Bronze.bz_campaigns(campaign_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE(load_timestamp)
+CLUSTER BY
+  application_id, campaign_id
+OPTIONS (
+  description = "A junction table linking applications to the campaigns that sourced them.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Activations
+CREATE TABLE IF NOT EXISTS Bronze.bz_activations (
+    activation_id INT64 NOT NULL,
+    application_id INT64 NOT NULL,
+    activation_date DATE,
+    first_transaction_amount FLOAT64,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (activation_id) NOT ENFORCED,
+    FOREIGN KEY (application_id) REFERENCES Bronze.bz_applications(application_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE_TRUNC(activation_date, MONTH)
+CLUSTER BY
+  application_id
+OPTIONS (
+  description = "Records card activation details and first transaction information.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Fraud_Checks
+CREATE TABLE IF NOT EXISTS Bronze.bz_fraud_checks (
+    fraud_check_id INT64 NOT NULL,
+    application_id INT64 NOT NULL,
+    check_type STRING,
+    check_result STRING,
+    check_date DATE,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (fraud_check_id) NOT ENFORCED,
+    FOREIGN KEY (application_id) REFERENCES Bronze.bz_applications(application_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE_TRUNC(check_date, MONTH)
+CLUSTER BY
+  application_id
+OPTIONS (
+  description = "Stores the results of fraud checks performed on applications.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Offers
+CREATE TABLE IF NOT EXISTS Bronze.bz_offers (
+    offer_id INT64 NOT NULL,
+    card_product_id INT64 NOT NULL,
+    offer_detail STRING,
+    valid_from DATE,
+    valid_to DATE,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (offer_id) NOT ENFORCED,
+    FOREIGN KEY (card_product_id) REFERENCES Bronze.bz_card_products(card_product_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE(load_timestamp)
+CLUSTER BY
+  card_product_id
+OPTIONS (
+  description = "Stores details of promotional offers associated with card products.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Offer_Performance
+CREATE TABLE IF NOT EXISTS Bronze.bz_offer_performance (
+    offer_analytics_id INT64 NOT NULL,
+    offer_id INT64 NOT NULL,
+    applications_count INT64,
+    activations_count INT64,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (offer_analytics_id) NOT ENFORCED,
+    FOREIGN KEY (offer_id) REFERENCES Bronze.bz_offers(offer_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE(load_timestamp)
+CLUSTER BY
+  offer_id
+OPTIONS (
+  description = "Stores aggregated performance metrics for offers.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Address_History
+CREATE TABLE IF NOT EXISTS Bronze.bz_address_history (
+    address_id INT64 NOT NULL,
+    applicant_id INT64 NOT NULL,
+    address_type STRING,
+    street STRING,
+    city STRING,
+    state STRING,
+    zip STRING,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (address_id) NOT ENFORCED,
+    FOREIGN KEY (applicant_id) REFERENCES Bronze.bz_applicants(applicant_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE(load_timestamp)
+CLUSTER BY
+  applicant_id
+OPTIONS (
+  description = "Stores the address history for applicants. Contains PII.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+-- DDL for Bz_Employment_Info
+CREATE TABLE IF NOT EXISTS Bronze.bz_employment_info (
+    employment_id INT64 NOT NULL,
+    applicant_id INT64 NOT NULL,
+    employer_name STRING,
+    job_title STRING,
+    income FLOAT64,
+    employment_type STRING,
+    load_timestamp TIMESTAMP NOT NULL,
+    update_timestamp TIMESTAMP,
+    source_system STRING NOT NULL,
+    PRIMARY KEY (employment_id) NOT ENFORCED,
+    FOREIGN KEY (applicant_id) REFERENCES Bronze.bz_applicants(applicant_id) NOT ENFORCED
+)
+PARTITION BY
+  DATE(load_timestamp)
+CLUSTER BY
+  applicant_id
+OPTIONS (
+  description = "Stores employment and income information for applicants. Contains PII.",
+  labels = [('layer', 'bronze'), ('source', 'credit_card_db')]
+);
+
+```
+
+---
+### **Conceptual Data Model Diagram**
+
+This table outlines the relationships between the entities in the Bronze layer, as defined by the informational foreign key constraints.
+
+| From Table (Many) | To Table (One) | Relationship Key |
+| :--- | :--- | :--- |
+| `bz_applications` | `bz_applicants` | `applicant_id` |
+| `bz_applications` | `bz_card_products` | `card_product_id` |
+| `bz_credit_scores` | `bz_applicants` | `applicant_id` |
+| `bz_address_history` | `bz_applicants` | `applicant_id` |
+| `bz_employment_info` | `bz_applicants` | `applicant_id` |
+| `bz_document_submissions` | `bz_applications` | `application_id` |
+| `bz_verification_results` | `bz_applications` | `application_id` |
+| `bz_underwriting_decisions` | `bz_applications` | `application_id` |
+| `bz_activations` | `bz_applications` | `application_id` |
+| `bz_fraud_checks` | `bz_applications` | `application_id` |
+| `bz_application_campaigns` | `bz_applications` | `application_id` |
+| `bz_application_campaigns` | `bz_campaigns` | `campaign_id` |
+| `bz_offers` | `bz_card_products` | `card_product_id` |
+| `bz_offer_performance` | `bz_offers` | `offer_id` |
+
+---
+### **BigQuery Optimization Recommendations**
+
+The physical model incorporates partitioning and clustering to optimize query performance and control costs, which are key features of Google BigQuery.
+
+#### **Partitioning Strategy**
+
+Partitioning divides a large table into smaller, more manageable segments based on a date or timestamp column. This significantly improves query performance and reduces cost by scanning only the relevant partitions (a process called "partition pruning").
+
+*   **Time-Series/Transactional Tables:** Tables that represent events or transactions (`bz_applications`, `bz_credit_scores`, `bz_activations`, etc.) are partitioned by a relevant business date column (e.g., `application_date`, `score_date`). They are partitioned by `MONTH` (`DATE_TRUNC(date_column, MONTH)`) because analysis on these tables often spans weeks or months, and monthly partitions provide a good balance between granularity and the number of partitions.
+*   **Dimension/Supporting Tables:** Tables that are less frequently queried by date or are primarily used for lookups (`bz_applicants`, `bz_card_products`, `bz_address_history`, etc.) are partitioned by `DATE(load_timestamp)`. This strategy is excellent for managing incremental data loads and for time-travel queries to see the state of the data as of a specific load date.
+
+#### **Clustering Recommendations**
+
+Clustering physically co-locates data within each partition based on the values in one or more columns. This further enhances query performance, especially for filters and joins on the clustered columns.
+
+*   **High-Cardinality Join Keys:** Columns frequently used in `JOIN` operations, such as `applicant_id` and `application_id`, are chosen as clustering keys. This speeds up joins by reducing the amount of data that needs to be scanned and shuffled.
+*   **Frequently Filtered Columns:** Columns often used in `WHERE` clauses, like `status` in the `bz_applications` table, are included in the clustering definition. This allows BigQuery to quickly locate the specific blocks of data that match the filter criteria.
+*   **Clustering Order:** The order of columns in the `CLUSTER BY` clause matters. The most frequently filtered or highest cardinality column is typically placed first.
+
+#### **Additional Optimization Notes**
+
+1.  **Informational Constraints:** While `PRIMARY KEY` and `FOREIGN KEY` constraints are `NOT ENFORCED` in BigQuery, defining them provides valuable metadata for BI tools and for the BigQuery query optimizer, which can use this information to improve join performance.
+2.  **Query Pruning:** To leverage these optimizations, always include the partitioned column in the `WHERE` clause of your queries whenever possible. For example, when querying `bz_applications`, include a filter like `WHERE application_date BETWEEN '2023-01-01' AND '2023-03-31'`.
+3.  **Columnar Storage:** The Bronze layer design inherently benefits from BigQuery's columnar storage format. Queries that only select a subset of columns will be significantly faster and cheaper as they only read data from the required columns.
+4.  **PII Handling:** The PII fields identified in the logical model (`ssn`, `full_name`, `email`, etc.) should be protected using BigQuery's column-level security and dynamic data masking policies in subsequent layers or by restricting access to these Bronze tables. The Bronze layer's purpose is to store data "as-is," so encryption or masking at this stage should be done with care to ensure reversibility if needed for downstream processing.
