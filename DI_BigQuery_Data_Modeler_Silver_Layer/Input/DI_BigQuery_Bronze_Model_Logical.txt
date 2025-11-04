@@ -1,0 +1,301 @@
+Here is the comprehensive logical data model for the Bronze layer of a Medallion architecture in BigQuery.
+
+### **Rationale for Key Design Decisions and Assumptions**
+
+*   **Source System Mirroring:** The Bronze layer is designed to be an exact, immutable replica of the source system data. This includes retaining all original columns, data types (mapped to BigQuery equivalents), and column names. This approach ensures 100% data traceability back to the source and prevents data loss.
+*   **Inclusion of Key Fields:** The instructions contained a potential ambiguity regarding the inclusion of primary and foreign key fields (columns ending in `_id`). The instruction to "remove those fields" has been interpreted as "do not enforce PK/FK constraints in BigQuery," which is a BigQuery best practice as it does not support them. The `_id` columns themselves have been retained. This decision is critical; removing these identifier columns would break the relational integrity of the data, making it impossible to join tables and build the Silver and Gold layers, thus defeating the purpose of the data platform. Retaining them aligns with the primary instruction to "mirror the source data structure exactly" and enables the relationships defined in the conceptual model.
+*   **Metadata Columns:** Three standard metadata columns are added to every Bronze table:
+    *   `load_timestamp`: Records when the data was loaded into BigQuery. This is essential for incremental processing, auditing, and debugging. It is the recommended partitioning key for all Bronze tables.
+    *   `update_timestamp`: Records the timestamp of the last modification in the source system, if available. For Bronze, this is often the same as `load_timestamp` if the source doesn't provide it.
+    *   `source_system`: Identifies the origin of the data (e.g., 'credit_card_db'). This is crucial in environments with multiple source systems.
+*   **Partitioning and Clustering:** Recommendations are based on BigQuery best practices. Partitioning by a `TIMESTAMP` or `DATE` column (like `load_timestamp` or `application_date`) is a standard practice to improve query performance and manage costs by pruning data that doesn't match a query's filter. Clustering is recommended on high-cardinality columns frequently used in `JOIN` or `WHERE` clauses to co-locate related data and further speed up queries.
+*   **Audit Table:** The `Bz_Audit_Log` table is a crucial component for data governance and operational monitoring. It tracks metadata for each load process, providing a clear audit trail of what data was loaded, when, by whom, and whether the process succeeded.
+
+### **1. PII Classification**
+
+The following fields are classified as Personally Identifiable Information (PII) and require special handling.
+
+| Column Name | Reason for PII Classification | BigQuery Security Recommendations |
+| :--- | :--- | :--- |
+| `full_name` | Direct identifier of an individual. | Dynamic Data Masking (Default Masking), Column-Level Security |
+| `email` | Direct identifier and personal contact information. | Dynamic Data Masking (Email Masking), Column-Level Security |
+| `phone_number` | Direct identifier and personal contact information. | Dynamic Data Masking (Default Masking), Column-Level Security |
+| `dob` (Date of Birth) | Sensitive personal data, can be used in combination with other fields to identify an individual. | Dynamic Data Masking (Date Year Mask), Column-Level Security |
+| `ssn` (Social Security Number) | Highly sensitive government-issued identifier. Direct and explicit PII. | Always Encrypt. Use Dynamic Data Masking (Hash) for analysts and Column-Level Security for strict access control. |
+| `street` | Part of a physical address, which is a direct identifier. | Dynamic Data Masking (Default Masking), Column-Level Security |
+| `city` | Part of a physical address. | Column-Level Security |
+| `state` | Part of a physical address. | Column-Level Security |
+| `zip` | Part of a physical address. | Column-Level Security |
+| `employer_name` | Can be used to infer identity, especially in combination with other fields. | Column-Level Security |
+| `income` | Sensitive financial information about an individual. | Dynamic Data Masking (Default Masking), Column-Level Security |
+
+### **2. Bronze Layer Logical Model**
+
+#### **Table: Bz_Applicants**
+**Description:** Stores raw data for each individual applying for a credit card.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `applicant_id` | Unique identifier for the applicant from the source system. | `INT64` |
+| `full_name` | The full legal name of the applicant. | `STRING` |
+| `email` | The email address of the applicant. | `STRING` |
+| `phone_number` | The contact phone number of the applicant. | `STRING` |
+| `dob` | The applicant's date of birth. | `DATE` |
+| `ssn` | The applicant's Social Security Number. | `STRING` |
+| `channel` | The channel through which the applicant was acquired. | `STRING` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `load_timestamp` (Day). Cluster by `applicant_id`.
+
+---
+#### **Table: Bz_Applications**
+**Description:** Stores raw data for each credit card application submitted.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `application_id` | Unique identifier for the application from the source system. | `INT64` |
+| `applicant_id` | Identifier linking to the applicant. | `INT64` |
+| `card_product_id` | Identifier linking to the card product applied for. | `INT64` |
+| `application_date` | The date the application was submitted. | `DATE` |
+| `status` | The current status of the application (e.g., 'Submitted', 'Approved'). | `STRING` |
+| `approval_date` | The date the application was approved. Null if not approved. | `DATE` |
+| `rejection_reason` | Reason for application rejection, if applicable. | `STRING`|
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `application_date` (Month). Cluster by `applicant_id`, `status`.
+
+---
+#### **Table: Bz_Card_Products**
+**Description:** Stores raw data for the different credit card products offered.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `card_product_id` | Unique identifier for the card product from the source system. | `INT64` |
+| `card_name` | The name of the credit card product. | `STRING` |
+| `category` | The category of the card (e.g., 'Travel', 'Cashback'). | `STRING` |
+| `interest_rate` | The annual interest rate for the card product. | `FLOAT64` |
+| `annual_fee` | The annual fee for the card product. | `FLOAT64` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `load_timestamp` (Day).
+
+---
+#### **Table: Bz_Credit_Scores**
+**Description:** Stores raw data of credit scores associated with applicants.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `credit_score_id` | Unique identifier for the credit score record. | `INT64` |
+| `applicant_id` | Identifier linking to the applicant. | `INT64` |
+| `score` | The applicant's credit score (300-900). | `INT64` |
+| `score_date` | The date the credit score was pulled. | `DATE` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `score_date` (Month). Cluster by `applicant_id`.
+
+---
+#### **Table: Bz_Document_Submissions**
+**Description:** Tracks documents submitted as part of an application.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `document_id` | Unique identifier for the submitted document. | `INT64` |
+| `application_id` | Identifier linking to the application. | `INT64` |
+| `document_type` | Type of document submitted (e.g., 'ID', 'Proof of Income'). | `STRING` |
+| `upload_date` | The date the document was uploaded. | `DATE` |
+| `verified_flag` | Flag indicating if the document has been verified. | `BOOL` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `upload_date` (Month). Cluster by `application_id`.
+
+---
+#### **Table: Bz_Verification_Results**
+**Description:** Stores the results of various verification checks for an application.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `verification_id` | Unique identifier for the verification result. | `INT64` |
+| `application_id` | Identifier linking to the application. | `INT64` |
+| `verification_type` | Type of verification performed (e.g., 'Identity', 'Income'). | `STRING` |
+| `result` | Outcome of the verification (e.g., 'Pass', 'Fail'). | `STRING` |
+| `verified_on` | The date the verification was completed. | `DATE` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `verified_on` (Month). Cluster by `application_id`, `verification_type`.
+
+---
+#### **Table: Bz_Underwriting_Decisions**
+**Description:** Records the final underwriting decision for an application.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `decision_id` | Unique identifier for the underwriting decision. | `INT64` |
+| `application_id` | Identifier linking to the application. | `INT64` |
+| `decision` | The final decision (e.g., 'Approved', 'Rejected'). | `STRING` |
+| `decision_reason` | The reason behind the decision. | `STRING` |
+| `decision_date` | The date the decision was made. | `DATE` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `decision_date` (Month). Cluster by `application_id`.
+
+---
+#### **Table: Bz_Campaigns**
+**Description:** Stores raw data for marketing campaigns.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `campaign_id` | Unique identifier for the marketing campaign. | `INT64` |
+| `campaign_name` | The name of the campaign. | `STRING` |
+| `channel` | The channel used for the campaign (e.g., 'Digital', 'Direct Mail'). | `STRING` |
+| `start_date` | The start date of the campaign. | `DATE` |
+| `end_date` | The end date of the campaign. | `DATE` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `load_timestamp` (Day).
+
+---
+#### **Table: Bz_Application_Campaigns**
+**Description:** A junction table linking applications to the campaigns that sourced them.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `app_campaign_id` | Unique identifier for the application-campaign link. | `INT64` |
+| `application_id` | Identifier linking to the application. | `INT64` |
+| `campaign_id` | Identifier linking to the campaign. | `INT64` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `load_timestamp` (Day). Cluster by `application_id`, `campaign_id`.
+
+---
+#### **Table: Bz_Activations**
+**Description:** Records card activation details and first transaction information.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `activation_id` | Unique identifier for the activation record. | `INT64` |
+| `application_id` | Identifier linking to the application. | `INT64` |
+| `activation_date` | The date the card was activated. | `DATE` |
+| `first_transaction_amount` | The amount of the first transaction made with the card. | `FLOAT64` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `activation_date` (Month). Cluster by `application_id`.
+
+---
+#### **Table: Bz_Fraud_Checks**
+**Description:** Stores the results of fraud checks performed on applications.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `fraud_check_id` | Unique identifier for the fraud check record. | `INT64` |
+| `application_id` | Identifier linking to the application. | `INT64` |
+| `check_type` | The type of fraud check performed. | `STRING` |
+| `check_result` | The outcome of the fraud check. | `STRING` |
+| `check_date` | The date the fraud check was executed. | `DATE` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `check_date` (Month). Cluster by `application_id`.
+
+---
+#### **Table: Bz_Offers**
+**Description:** Stores details of promotional offers associated with card products.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `offer_id` | Unique identifier for the offer. | `INT64` |
+| `card_product_id` | Identifier linking to the card product. | `INT64` |
+| `offer_detail` | A description of the promotional offer. | `STRING` |
+| `valid_from` | The start date of the offer's validity. | `DATE` |
+| `valid_to` | The end date of the offer's validity. | `DATE` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `load_timestamp` (Day). Cluster by `card_product_id`.
+
+---
+#### **Table: Bz_Offer_Performance**
+**Description:** Stores aggregated performance metrics for offers.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `offer_analytics_id` | Unique identifier for the performance record. | `INT64` |
+| `offer_id` | Identifier linking to the offer. | `INT64` |
+| `applications_count` | The number of applications generated from the offer. | `INT64` |
+| `activations_count` | The number of activations resulting from the offer. | `INT64` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `load_timestamp` (Day). Cluster by `offer_id`.
+
+---
+#### **Table: Bz_Address_History**
+**Description:** Stores the address history for applicants.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `address_id` | Unique identifier for the address record. | `INT64` |
+| `applicant_id` | Identifier linking to the applicant. | `INT64` |
+| `address_type` | Type of address (e.g., 'Home', 'Mailing'). | `STRING` |
+| `street` | The street address. | `STRING` |
+| `city` | The city. | `STRING` |
+| `state` | The state or province. | `STRING` |
+| `zip` | The postal or ZIP code. | `STRING` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `load_timestamp` (Day). Cluster by `applicant_id`.
+
+---
+#### **Table: Bz_Employment_Info**
+**Description:** Stores employment and income information for applicants.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `employment_id` | Unique identifier for the employment record. | `INT64` |
+| `applicant_id` | Identifier linking to the applicant. | `INT64` |
+| `employer_name` | The name of the applicant's employer. | `STRING` |
+| `job_title` | The applicant's job title. | `STRING` |
+| `income` | The applicant's reported income. | `FLOAT64` |
+| `employment_type` | The type of employment (e.g., 'Full-time', 'Self-employed'). | `STRING` |
+| `load_timestamp` | Timestamp of when the record was loaded into BigQuery. | `TIMESTAMP` |
+| `update_timestamp` | Timestamp of the last update from the source. | `TIMESTAMP` |
+| `source_system` | The source system from which the data originated. | `STRING` |
+**Partitioning/Clustering:** Partition by `load_timestamp` (Day). Cluster by `applicant_id`.
+
+### **3. Audit Table Design**
+
+#### **Table: Bz_Audit_Log**
+**Description:** Tracks metadata for each data loading process into the Bronze layer, providing an essential audit trail for data governance and operations.
+
+| Field | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| `record_id` | A unique identifier for each audit log entry (e.g., a UUID). | `STRING` |
+| `source_table` | The name of the source table being loaded (e.g., 'credit_card.Applicants'). | `STRING` |
+| `load_timestamp` | The timestamp when the load process began. | `TIMESTAMP` |
+| `processed_by` | The service or user that executed the load process (e.g., 'Dataflow-Job-XYZ'). | `STRING` |
+| `processing_time` | The duration of the load process in seconds. | `FLOAT64` |
+| `status` | The final status of the load (e.g., 'Success', 'Failed', 'Partial Success'). | `STRING` |
+
+### **4. Conceptual Data Model Diagram**
+
+This table represents the entity relationships based on the provided conceptual model and confirmed by the source system's foreign keys.
+
+| From Table | To Table | Relationship Key |
+| :--- | :--- | :--- |
+| Application | Applicant | `applicant_id` |
+| Application | Card Product | `card_product_id` |
+| Application | Acquisition Channel | `channel_id` (Inferred, represented by `channel` field) |
+| Application | Campaign | `campaign_id` (via `Application_Campaigns` table) |
+| Application | Credit Risk | `applicant_id` (via `Credit_Scores` table) |
+| Application | Fraud Check | `application_id` (via `Fraud_Checks` table) |
+| Application | Transaction | `application_id` (via `Activations` table) |
