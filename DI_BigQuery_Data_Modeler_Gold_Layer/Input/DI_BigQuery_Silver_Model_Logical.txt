@@ -1,0 +1,144 @@
+### **Rationale for Key Design Decisions and Assumptions**
+
+*   **Interpretation of Instructions:** The instructions present a contradiction: to remove all primary, foreign, and unique identifier fields from the Silver tables, but also to document table relationships using key fields. This logical data model resolves this by:
+    1.  Strictly adhering to the rule of removing all `_id` and other identifier columns from the Silver layer table definitions as explicitly instructed.
+    2.  Fulfilling the relationship documentation requirement by reproducing the conceptual relationship diagram provided in the input.
+    3.  This design implies that while the physical Silver tables are stored without surrogate keys, the relational logic is handled entirely within the ETL/ELT processing layer (e.g., when transforming data from Bronze to Silver or building Gold layer models). The joins are performed in-memory during the pipeline run, and the resulting conformed tables are saved without the keys used to create them.
+
+*   **Table Structure and Conformance:** The Silver layer tables are modeled based on the business-centric `Model Conceptua` entities (`Application`, `Applicant`, etc.) rather than a direct 1:1 mirror of the more granular `BigQuery Model Logical Bronze Layer` tables. This is a standard and best practice for a Silver layer, as its purpose is to consolidate, cleanse, and conform data into structures that are more intuitive for business analysis and reporting. For instance, attributes from various source tables are integrated into a more holistic `Si_Application` table. This process involves data type standardization, cleansing based on business rules, and enrichment.
+
+*   **Audit and Error Data Management:** Two dedicated tables, `Si_Audit_Log` and `Si_Error_Log`, are included as a cornerstone of a robust and governable data platform.
+    *   **`Si_Audit_Log`**: Provides a high-level execution summary for each pipeline run, tracking metadata like duration, status, and row counts. This is essential for operational monitoring, performance tuning, and demonstrating compliance.
+    *   **`Si_Error_Log`**: Captures row-level data quality and validation failures identified during the transformation process. This allows for systematic data stewardship, debugging of data quality rules, and quantifying data issues without polluting the main business tables with bad data or error flags.
+
+*   **Assumptions:**
+    *   It is assumed that the ETL/ELT logic populating the Silver layer is responsible for joining the various Bronze tables (using their keys) to create these consolidated Silver tables.
+    *   It is assumed that the `record_identifier` in the `Si_Error_Log` can be a generated hash of the source row's content to provide a unique reference to the problematic data without relying on a persistent ID in the Silver layer.
+
+### **1. Silver Layer Logical Model**
+
+#### **Table: Si_Application**
+**Description:** Stores conformed and cleansed data for each credit card application, consolidated from multiple source tables.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| application_date | The date the application was submitted. | `DATE` |
+| approval_date | The date the application was approved. Null if not approved. | `DATE` |
+| activation_date | The date the associated card was activated. Null if not activated. | `DATE` |
+| application_outcome | The final, standardized status of the application (e.g., 'Approved', 'Rejected'). | `STRING` |
+| fraud_screening_result | The final, standardized outcome of the fraud screening process (e.g., 'Pass', 'Fail', 'Review'). | `STRING` |
+
+---
+#### **Table: Si_Applicant**
+**Description:** Stores conformed and standardized demographic and geographic information about the applicant. PII has been removed or masked as per governance rules.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| geography | The geographical region or state of the applicant. | `STRING` |
+| age_group | The derived age bracket of the applicant (e.g., '25-34', '35-44'). | `STRING` |
+| income_level | The derived income bracket of the applicant (e.g., '50k-75k', '75k-100k'). | `STRING` |
+| employment_type | The standardized employment status of the applicant (e.g., 'Full-time', 'Self-employed'). | `STRING` |
+
+---
+#### **Table: Si_Card_Product**
+**Description:** A conformed dimension table for the different types of credit cards offered.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| product_name | The standardized name of the credit card product. | `STRING` |
+
+---
+#### **Table: Si_Acquisition_Channel**
+**Description:** A conformed dimension table for the various channels through which customers apply.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| channel_name | The standardized name of the acquisition channel (e.g., 'Online', 'In-Branch'). | `STRING` |
+
+---
+#### **Table: Si_Campaign**
+**Description:** A conformed dimension table for marketing campaigns.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| campaign_name | The standardized name of the marketing campaign. | `STRING` |
+| campaign_type | The standardized type of the campaign (e.g., 'Digital', 'Direct Mail'). | `STRING` |
+| start_date | The start date of the campaign. | `DATE` |
+| end_date | The end date of the campaign. | `DATE` |
+| marketing_cost | The cost associated with the campaign. | `FLOAT64` |
+
+---
+#### **Table: Si_Credit_Risk**
+**Description:** Stores conformed credit risk information associated with an applicant at the time of application.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| credit_score | The credit score of the applicant. | `INT64` |
+| risk_tier | The risk category assigned based on the credit score (e.g., 'Low Risk', 'Medium Risk'). | `STRING` |
+
+---
+#### **Table: Si_Fraud_Check**
+**Description:** Stores cleansed and standardized details about the fraud screening process for an application.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| fraud_check_type | The standardized type of fraud check performed (e.g., 'Identity Verification', 'Address Verification'). | `STRING` |
+| check_execution_date | The date the fraud check was executed. | `DATE` |
+| screening_result | The standardized result of the specific fraud screening check. | `STRING` |
+
+---
+#### **Table: Si_Transaction**
+**Description:** Stores conformed data about the first transaction made by a new cardholder.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| transaction_date | The date of the first transaction. | `DATE` |
+| transaction_amount | The amount of the first transaction. | `FLOAT64` |
+| promotional_offer_detail | Details of any promotional offer associated with the transaction. | `STRING` |
+
+---
+#### **Table: Si_Audit_Log**
+**Description:** Tracks metadata for each data processing pipeline run that loads data into the Silver layer. Provides a complete audit trail for data movement and transformation.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| pipeline_run_id | A unique identifier for each execution of a pipeline (e.g., a UUID). | `STRING` |
+| pipeline_name | The name of the pipeline that was executed (e.g., 'bronze_to_silver_applications'). | `STRING` |
+| start_timestamp | The timestamp when the pipeline run began. | `TIMESTAMP` |
+| end_timestamp | The timestamp when the pipeline run finished. | `TIMESTAMP` |
+| status | The final status of the run ('Success', 'Failed', 'Partial Success'). | `STRING` |
+| source_tables | A list of source tables read during the pipeline run. | `STRING` |
+| target_table | The destination table in the Silver layer. | `STRING` |
+| rows_read | The total number of rows read from the source(s). | `INT64` |
+| rows_written | The total number of rows written to the target table. | `INT64` |
+| run_by_user | The service account or user that executed the pipeline. | `STRING` |
+
+---
+#### **Table: Si_Error_Log**
+**Description:** Captures detailed information about individual records that fail data quality or validation checks during the transformation from Bronze to Silver.
+
+| Column Name | Description | BigQuery Data Type |
+| :--- | :--- | :--- |
+| error_id | A unique identifier for each error record (e.g., a UUID). | `STRING` |
+| pipeline_run_id | The identifier of the pipeline run during which the error occurred, linking to `Si_Audit_Log`. | `STRING` |
+| error_timestamp | The timestamp when the error was logged. | `TIMESTAMP` |
+| source_table | The source table from which the problematic record originated. | `STRING` |
+| record_identifier | A unique reference to the source record (e.g., a hash of the row content). | `STRING` |
+| column_name | The name of the column where the error was detected. | `STRING` |
+| failed_rule | The specific data quality rule that the record failed (e.g., 'NOT_NULL', 'REGEX_FORMAT'). | `STRING` |
+| error_description | A detailed description of the validation failure. | `STRING` |
+| erroneous_value | The actual data value that caused the error. | `STRING` |
+
+### **2. Conceptual Data Model Diagram**
+
+This table represents the conceptual entity relationships as provided in the input. For these relationships to be implemented in practice, the ETL/ELT logic must use the specified keys to join data from the Bronze layer before loading the key-less tables in the Silver layer.
+
+| From Table | To Table | Relationship Key |
+| :--- | :--- | :--- |
+| Application | Applicant | Applicant ID |
+| Application | Card Product | Card Product ID |
+| Application | Acquisition Channel | Channel ID |
+| Application | Campaign | Campaign ID |
+| Application | Credit Risk | Applicant ID |
+| Application | Fraud Check | Application ID |
+| Application | Transaction | Cardholder ID |
