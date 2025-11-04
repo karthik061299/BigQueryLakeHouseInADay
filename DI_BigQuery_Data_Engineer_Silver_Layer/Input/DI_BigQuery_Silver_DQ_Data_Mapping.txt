@@ -1,0 +1,287 @@
+### **1) Overview**
+
+This document provides a comprehensive data mapping specification for transforming data from the Bronze Layer to the Silver Layer within a Medallion architecture implemented on Google BigQuery. The primary goal of this Bronze-to-Silver process is to elevate raw, immutable source data into a cleansed, conformed, and enriched state, making it reliable and query-friendly for analytics, reporting, and further processing into the Gold Layer.
+
+**Key Considerations and Approach:**
+
+*   **Cleansing:** Basic data hygiene is applied to string fields, such as removing leading/trailing whitespace (`TRIM()`) and standardizing case (`UPPER()` or `LOWER()`) to ensure consistency.
+*   **Validation:** Each attribute is subjected to a series of validation rules derived from DDL constraints (`NOT NULL`), business logic, and data quality recommendations. These rules include checks for completeness, uniqueness, referential integrity, valid formats (e.g., email regex), and plausible ranges (e.g., credit scores).
+*   **Standardization & Conformance:** Source system values in categorical fields (e.g., application status, document types) are mapped to a standardized, enterprise-wide set of values. This ensures that data from different sources can be integrated and compared seamlessly.
+*   **Enrichment:** New, business-relevant attributes are derived from existing data to add analytical value. Examples include calculating an applicant's `age_group` from their date of birth, deriving a `risk_tier` from a credit score, and creating an `income_level` from income data.
+*   **PII (Personally Identifiable Information) Handling:** Sensitive data fields such as `ssn`, `email`, and `phone_number` are transformed using tokenization or masking functions to protect privacy while retaining their utility for joins and analysis. The specific transformation (`SHA256`, `FARM_FINGERPRINT`, or a call to a tokenization service) is specified.
+*   **Error Handling and Auditing:** A robust error handling mechanism is central to this design. Any record that fails a validation rule during the transformation process is not discarded. Instead, it is rerouted to the `Silver.si_error_log` table. This table captures the original record, the specific rule that failed, and other metadata, enabling data stewards to diagnose and remediate quality issues. The entire pipeline execution is logged in the `Silver.si_audit_log` table, providing a complete audit trail of data movement, including rows read, written, and rejected.
+*   **Technology:** All transformations and validation rules are designed to be implemented using BigQuery Standard SQL, leveraging its built-in functions for efficiency and scalability.
+
+This mapping serves as the definitive guide for ETL/ELT developers to build the data pipelines that populate the Silver Layer, ensuring a foundation of high-quality, trusted data for the entire organization.
+
+---
+
+### **2) Data Mapping for the Silver Layer**
+
+#### **Table: `si_applicants`**
+This table stores conformed and cleansed applicant information, with PII fields masked or tokenized.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_applicants | applicant_id | Bronze | bz_applicants | applicant_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_applicants | full_name | Bronze | bz_applicants | full_name | NOT NULL | `UPPER(TRIM(full_name))` |
+| Silver | si_applicants | email | Bronze | bz_applicants | email | NOT NULL; VALID FORMAT (REGEX: `r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'`) | **PII Masking:** `SHA256(LOWER(TRIM(email)))` |
+| Silver | si_applicants | phone_number | Bronze | bz_applicants | phone_number | VALID FORMAT (e.g., check for length after stripping non-digits) | **PII Masking:** `SHA256(REGEXP_REPLACE(phone_number, r'[^0-9]', ''))` |
+| Silver | si_applicants | dob | Bronze | bz_applicants | dob | NOT NULL; Must be a valid date in the past. | Direct mapping. |
+| Silver | si_applicants | age_group | Bronze | bz_applicants | dob | Applicant must be >= 18 years old at time of application (checked in `si_applications` logic). | **Enrichment:** `CASE WHEN DATE_DIFF(CURRENT_DATE(), dob, YEAR) BETWEEN 18 AND 24 THEN '18-24' WHEN DATE_DIFF(CURRENT_DATE(), dob, YEAR) BETWEEN 25 AND 34 THEN '25-34' ... ELSE 'Other' END` |
+| Silver | si_applicants | ssn | Bronze | bz_applicants | ssn | VALID FORMAT (e.g., 9 digits) | **PII Tokenization:** `SHA256(TRIM(ssn))` |
+| Silver | si_applicants | channel | Bronze | bz_applicants | channel | NOT NULL | `UPPER(TRIM(channel))` |
+| Silver | si_applicants | load_timestamp | Bronze | bz_applicants | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_applicants | update_timestamp | Bronze | bz_applicants | update_timestamp | - | Direct mapping. |
+| Silver | si_applicants | source_system | Bronze | bz_applicants | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_card_products`**
+This table serves as a conformed dimension for all available credit card products.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_card_products | card_product_id | Bronze | bz_card_products | card_product_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_card_products | card_name | Bronze | bz_card_products | card_name | NOT NULL | `TRIM(card_name)` |
+| Silver | si_card_products | category | Bronze | bz_card_products | category | NOT NULL; Must be in predefined list ('REWARDS', 'TRAVEL', 'CASH BACK', 'LOW INTEREST') | `UPPER(TRIM(category))` |
+| Silver | si_card_products | interest_rate | Bronze | bz_card_products | interest_rate | NOT NULL; Must be >= 0 | Direct mapping. |
+| Silver | si_card_products | annual_fee | Bronze | bz_card_products | annual_fee | NOT NULL; Must be >= 0 | Direct mapping. |
+| Silver | si_card_products | load_timestamp | Bronze | bz_card_products | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_card_products | update_timestamp | Bronze | bz_card_products | update_timestamp | - | Direct mapping. |
+| Silver | si_card_products | source_system | Bronze | bz_card_products | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_applications`**
+This table stores cleansed and conformed application data, including a standardized outcome.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_applications | application_id | Bronze | bz_applications | application_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_applications | applicant_id | Bronze | bz_applications | applicant_id | NOT NULL; Must exist in `si_applicants.applicant_id` | Direct mapping. |
+| Silver | si_applications | card_product_id | Bronze | bz_applications | card_product_id | NOT NULL; Must exist in `si_card_products.card_product_id` | Direct mapping. |
+| Silver | si_applications | application_date | Bronze | bz_applications | application_date | NOT NULL; Must be <= `CURRENT_DATE()` | Direct mapping. |
+| Silver | si_applications | status | Bronze | bz_applications | status | NOT NULL | Direct mapping. |
+| Silver | si_applications | application_outcome | Bronze | bz_applications | status | NOT NULL | **Standardization:** `CASE UPPER(TRIM(status)) WHEN 'APPROVED' THEN 'Approved' WHEN 'REJECTED' THEN 'Rejected' WHEN 'PENDING' THEN 'In-Review' ELSE 'Other' END` |
+| Silver | si_applications | approval_date | Bronze | bz_applications | approval_date | If `application_outcome` = 'Approved', must not be NULL. Must be >= `application_date`. | Direct mapping. |
+| Silver | si_applications | rejection_reason | Bronze | bz_applications | rejection_reason | If `application_outcome` = 'Rejected', should not be NULL. | `TRIM(rejection_reason)` |
+| Silver | si_applications | load_timestamp | Bronze | bz_applications | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_applications | update_timestamp | Bronze | bz_applications | update_timestamp | - | Direct mapping. |
+| Silver | si_applications | source_system | Bronze | bz_applications | source_system | NOT NULL | Direct mapping. |
+| Silver | si_applications | credit_limit | - | - | - | Must be >= 0 if not NULL. | Populated by a separate process or later update. Default to NULL. |
+
+#### **Table: `si_credit_scores`**
+This table stores conformed credit scores and a derived risk tier for each applicant.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_credit_scores | credit_score_id | Bronze | bz_credit_scores | credit_score_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_credit_scores | applicant_id | Bronze | bz_credit_scores | applicant_id | NOT NULL; Must exist in `si_applicants.applicant_id` | Direct mapping. |
+| Silver | si_credit_scores | score | Bronze | bz_credit_scores | score | NOT NULL; Must be between 300 and 850. | Direct mapping. |
+| Silver | si_credit_scores | risk_tier | Bronze | bz_credit_scores | score | NOT NULL | **Enrichment:** `CASE WHEN score >= 750 THEN 'Prime' WHEN score BETWEEN 650 AND 749 THEN 'Near-Prime' WHEN score < 650 THEN 'Subprime' ELSE 'Undefined' END` |
+| Silver | si_credit_scores | score_date | Bronze | bz_credit_scores | score_date | NOT NULL; Must be <= `CURRENT_DATE()` | Direct mapping. |
+| Silver | si_credit_scores | load_timestamp | Bronze | bz_credit_scores | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_credit_scores | update_timestamp | Bronze | bz_credit_scores | update_timestamp | - | Direct mapping. |
+| Silver | si_credit_scores | source_system | Bronze | bz_credit_scores | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_document_submissions`**
+This table tracks cleansed data about documents submitted for an application.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_document_submissions | document_id | Bronze | bz_document_submissions | document_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_document_submissions | application_id | Bronze | bz_document_submissions | application_id | NOT NULL; Must exist in `si_applications.application_id` | Direct mapping. |
+| Silver | si_document_submissions | document_type | Bronze | bz_document_submissions | document_type | NOT NULL; Must be in predefined list. | **Standardization:** `CASE UPPER(TRIM(document_type)) WHEN 'ID' THEN 'ID_Proof' WHEN 'ADDR' THEN 'Address_Proof' ELSE 'Other' END` |
+| Silver | si_document_submissions | upload_date | Bronze | bz_document_submissions | upload_date | NOT NULL; Must be <= `CURRENT_DATE()` | Direct mapping. |
+| Silver | si_document_submissions | verified_flag | Bronze | bz_document_submissions | verified_flag | Must be TRUE or FALSE. | `COALESCE(verified_flag, FALSE)` |
+| Silver | si_document_submissions | load_timestamp | Bronze | bz_document_submissions | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_document_submissions | update_timestamp | Bronze | bz_document_submissions | update_timestamp | - | Direct mapping. |
+| Silver | si_document_submissions | source_system | Bronze | bz_document_submissions | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_verification_results`**
+This table stores conformed results of various verification checks.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_verification_results | verification_id | Bronze | bz_verification_results | verification_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_verification_results | application_id | Bronze | bz_verification_results | application_id | NOT NULL; Must exist in `si_applications.application_id` | Direct mapping. |
+| Silver | si_verification_results | verification_type | Bronze | bz_verification_results | verification_type | NOT NULL | **Standardization:** `UPPER(TRIM(verification_type))` |
+| Silver | si_verification_results | result | Bronze | bz_verification_results | result | NOT NULL; Must be in predefined list. | **Standardization:** `CASE UPPER(TRIM(result)) WHEN 'VERIFIED' THEN 'Verified' WHEN 'NOT VERIFIED' THEN 'Not_Verified' ELSE 'Mismatch' END` |
+| Silver | si_verification_results | verified_on | Bronze | bz_verification_results | verified_on | NOT NULL; Must be <= `CURRENT_DATE()` | Direct mapping. |
+| Silver | si_verification_results | load_timestamp | Bronze | bz_verification_results | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_verification_results | update_timestamp | Bronze | bz_verification_results | update_timestamp | - | Direct mapping. |
+| Silver | si_verification_results | source_system | Bronze | bz_verification_results | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_underwriting_decisions`**
+This table records the conformed underwriting decision for an application.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_underwriting_decisions | decision_id | Bronze | bz_underwriting_decisions | decision_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_underwriting_decisions | application_id | Bronze | bz_underwriting_decisions | application_id | NOT NULL; Must exist in `si_applications.application_id` | Direct mapping. |
+| Silver | si_underwriting_decisions | decision | Bronze | bz_underwriting_decisions | decision | NOT NULL; Must be in predefined list. | **Standardization:** `CASE UPPER(TRIM(decision)) WHEN 'AUTO APPROVE' THEN 'Auto_Approved' WHEN 'MANUAL' THEN 'Manual_Review' ELSE 'Declined' END` |
+| Silver | si_underwriting_decisions | decision_reason | Bronze | bz_underwriting_decisions | decision_reason | - | `TRIM(decision_reason)` |
+| Silver | si_underwriting_decisions | decision_date | Bronze | bz_underwriting_decisions | decision_date | NOT NULL; Must be <= `CURRENT_DATE()` | Direct mapping. |
+| Silver | si_underwriting_decisions | load_timestamp | Bronze | bz_underwriting_decisions | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_underwriting_decisions | update_timestamp | Bronze | bz_underwriting_decisions | update_timestamp | - | Direct mapping. |
+| Silver | si_underwriting_decisions | source_system | Bronze | bz_underwriting_decisions | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_campaigns`**
+This table is a conformed dimension for marketing campaigns.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_campaigns | campaign_id | Bronze | bz_campaigns | campaign_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_campaigns | campaign_name | Bronze | bz_campaigns | campaign_name | NOT NULL | `TRIM(campaign_name)` |
+| Silver | si_campaigns | channel | Bronze | bz_campaigns | channel | NOT NULL; Must be in predefined list. | **Standardization:** `CASE UPPER(TRIM(channel)) WHEN 'WEB' THEN 'Digital' WHEN 'MAIL' THEN 'Direct_Mail' ELSE UPPER(TRIM(channel)) END` |
+| Silver | si_campaigns | start_date | Bronze | bz_campaigns | start_date | NOT NULL | Direct mapping. |
+| Silver | si_campaigns | end_date | Bronze | bz_campaigns | end_date | NOT NULL; Must be >= `start_date` | Direct mapping. |
+| Silver | si_campaigns | load_timestamp | Bronze | bz_campaigns | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_campaigns | update_timestamp | Bronze | bz_campaigns | update_timestamp | - | Direct mapping. |
+| Silver | si_campaigns | source_system | Bronze | bz_campaigns | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_application_campaigns`**
+This junction table links applications to the campaigns that sourced them.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_application_campaigns | app_campaign_id | Bronze | bz_application_campaigns | app_campaign_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_application_campaigns | application_id | Bronze | bz_application_campaigns | application_id | NOT NULL; Must exist in `si_applications.application_id` | Direct mapping. |
+| Silver | si_application_campaigns | campaign_id | Bronze | bz_application_campaigns | campaign_id | NOT NULL; Must exist in `si_campaigns.campaign_id` | Direct mapping. |
+| Silver | si_application_campaigns | load_timestamp | Bronze | bz_application_campaigns | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_application_campaigns | update_timestamp | Bronze | bz_application_campaigns | update_timestamp | - | Direct mapping. |
+| Silver | si_application_campaigns | source_system | Bronze | bz_application_campaigns | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_activations`**
+This table records conformed card activation details.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_activations | activation_id | Bronze | bz_activations | activation_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_activations | application_id | Bronze | bz_activations | application_id | NOT NULL; Must exist in `si_applications.application_id` | Direct mapping. |
+| Silver | si_activations | activation_date | Bronze | bz_activations | activation_date | NOT NULL; Must be >= `approval_date` from `si_applications`. | Direct mapping. |
+| Silver | si_activations | first_transaction_amount | Bronze | bz_activations | first_transaction_amount | Must be >= 0 if not NULL. | Direct mapping. |
+| Silver | si_activations | load_timestamp | Bronze | bz_activations | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_activations | update_timestamp | Bronze | bz_activations | update_timestamp | - | Direct mapping. |
+| Silver | si_activations | source_system | Bronze | bz_activations | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_fraud_checks`**
+This table stores the conformed results of fraud checks.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_fraud_checks | fraud_check_id | Bronze | bz_fraud_checks | fraud_check_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_fraud_checks | application_id | Bronze | bz_fraud_checks | application_id | NOT NULL; Must exist in `si_applications.application_id` | Direct mapping. |
+| Silver | si_fraud_checks | check_type | Bronze | bz_fraud_checks | check_type | NOT NULL | **Standardization:** `UPPER(TRIM(check_type))` |
+| Silver | si_fraud_checks | check_result | Bronze | bz_fraud_checks | check_result | NOT NULL; Must be in predefined list ('PASS', 'FAIL', 'REVIEW'). | **Standardization:** `UPPER(TRIM(check_result))` |
+| Silver | si_fraud_checks | check_date | Bronze | bz_fraud_checks | check_date | NOT NULL; Must be <= `CURRENT_DATE()` | Direct mapping. |
+| Silver | si_fraud_checks | load_timestamp | Bronze | bz_fraud_checks | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_fraud_checks | update_timestamp | Bronze | bz_fraud_checks | update_timestamp | - | Direct mapping. |
+| Silver | si_fraud_checks | source_system | Bronze | bz_fraud_checks | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_offers`**
+This table stores conformed details of promotional offers.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_offers | offer_id | Bronze | bz_offers | offer_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_offers | card_product_id | Bronze | bz_offers | card_product_id | NOT NULL; Must exist in `si_card_products.card_product_id` | Direct mapping. |
+| Silver | si_offers | offer_detail | Bronze | bz_offers | offer_detail | - | `TRIM(offer_detail)` |
+| Silver | si_offers | valid_from | Bronze | bz_offers | valid_from | NOT NULL | Direct mapping. |
+| Silver | si_offers | valid_to | Bronze | bz_offers | valid_to | NOT NULL; Must be >= `valid_from` | Direct mapping. |
+| Silver | si_offers | load_timestamp | Bronze | bz_offers | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_offers | update_timestamp | Bronze | bz_offers | update_timestamp | - | Direct mapping. |
+| Silver | si_offers | source_system | Bronze | bz_offers | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_offer_performance`**
+This table stores cleansed, aggregated performance metrics for offers.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_offer_performance | offer_analytics_id | Bronze | bz_offer_performance | offer_analytics_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_offer_performance | offer_id | Bronze | bz_offer_performance | offer_id | NOT NULL; Must exist in `si_offers.offer_id` | Direct mapping. |
+| Silver | si_offer_performance | applications_count | Bronze | bz_offer_performance | applications_count | Must be >= 0. | `COALESCE(applications_count, 0)` |
+| Silver | si_offer_performance | activations_count | Bronze | bz_offer_performance | activations_count | Must be >= 0. Must be <= `applications_count`. | `COALESCE(activations_count, 0)` |
+| Silver | si_offer_performance | load_timestamp | Bronze | bz_offer_performance | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_offer_performance | update_timestamp | Bronze | bz_offer_performance | update_timestamp | - | Direct mapping. |
+| Silver | si_offer_performance | source_system | Bronze | bz_offer_performance | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_address_history`**
+This table stores conformed and cleansed address history for applicants.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_address_history | address_id | Bronze | bz_address_history | address_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_address_history | applicant_id | Bronze | bz_address_history | applicant_id | NOT NULL; Must exist in `si_applicants.applicant_id` | Direct mapping. |
+| Silver | si_address_history | address_type | Bronze | bz_address_history | address_type | NOT NULL; Must be in predefined list ('HOME', 'WORK'). | `UPPER(TRIM(address_type))` |
+| Silver | si_address_history | street | Bronze | bz_address_history | street | NOT NULL | **PII Masking:** `SHA256(UPPER(TRIM(street)))` |
+| Silver | si_address_history | city | Bronze | bz_address_history | city | NOT NULL | `UPPER(TRIM(city))` |
+| Silver | si_address_history | state | Bronze | bz_address_history | state | NOT NULL; Must be a valid 2-character state code. | `UPPER(TRIM(state))` |
+| Silver | si_address_history | zip | Bronze | bz_address_history | zip | NOT NULL; Must be a valid 5-digit zip code. | `LPAD(TRIM(zip), 5, '0')` |
+| Silver | si_address_history | load_timestamp | Bronze | bz_address_history | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_address_history | update_timestamp | Bronze | bz_address_history | update_timestamp | - | Direct mapping. |
+| Silver | si_address_history | source_system | Bronze | bz_address_history | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_employment_info`**
+This table stores conformed employment and income information, including a derived income level.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_employment_info | employment_id | Bronze | bz_employment_info | employment_id | NOT NULL; UNIQUE | Direct mapping. |
+| Silver | si_employment_info | applicant_id | Bronze | bz_employment_info | applicant_id | NOT NULL; Must exist in `si_applicants.applicant_id` | Direct mapping. |
+| Silver | si_employment_info | employer_name | Bronze | bz_employment_info | employer_name | - | `UPPER(TRIM(employer_name))` |
+| Silver | si_employment_info | job_title | Bronze | bz_employment_info | job_title | - | `TRIM(job_title)` |
+| Silver | si_employment_info | income | Bronze | bz_employment_info | income | NOT NULL; Must be >= 0. | Direct mapping. |
+| Silver | si_employment_info | income_level | Bronze | bz_employment_info | income | NOT NULL | **Enrichment:** `CASE WHEN income < 50000 THEN '<50k' WHEN income BETWEEN 50000 AND 74999 THEN '50k-75k' ... ELSE '>200k' END` |
+| Silver | si_employment_info | employment_type | Bronze | bz_employment_info | employment_type | NOT NULL; Must be in predefined list. | **Standardization:** `CASE UPPER(TRIM(employment_type)) WHEN 'FULL TIME' THEN 'Full-Time' WHEN 'PART TIME' THEN 'Part-Time' ELSE 'Self-Employed' END` |
+| Silver | si_employment_info | load_timestamp | Bronze | bz_employment_info | load_timestamp | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_employment_info | update_timestamp | Bronze | bz_employment_info | update_timestamp | - | Direct mapping. |
+| Silver | si_employment_info | source_system | Bronze | bz_employment_info | source_system | NOT NULL | Direct mapping. |
+
+#### **Table: `si_audit_log`**
+This governance table is populated by the ETL/ELT pipeline framework, not by direct mapping from a Bronze source table.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_audit_log | pipeline_run_id | Pipeline Framework | Metadata | run_id | NOT NULL; UNIQUE | `GENERATE_UUID()` |
+| Silver | si_audit_log | pipeline_name | Pipeline Framework | Configuration | pipeline_name | NOT NULL | Value from pipeline configuration. |
+| Silver | si_audit_log | start_timestamp | Pipeline Framework | Metadata | execution_start_time | NOT NULL | Value from pipeline framework. |
+| Silver | si_audit_log | end_timestamp | Pipeline Framework | Metadata | execution_end_time | NOT NULL | Value from pipeline framework. |
+| Silver | si_audit_log | duration_seconds | Pipeline Framework | Metadata | start/end times | NOT NULL | `TIMESTAMP_DIFF(end_timestamp, start_timestamp, SECOND)` |
+| Silver | si_audit_log | status | Pipeline Framework | Metadata | final_status | NOT NULL | Value from pipeline framework ('Success', 'Failed'). |
+| Silver | si_audit_log | source_tables | Pipeline Framework | Configuration | source_table_list | NOT NULL | Value from pipeline configuration. |
+| Silver | si_audit_log | target_table | Pipeline Framework | Configuration | target_table_name | NOT NULL | Value from pipeline configuration. |
+| Silver | si_audit_log | rows_read | Pipeline Framework | Metrics | source_row_count | NOT NULL | Count of rows read from source. |
+| Silver | si_audit_log | rows_written | Pipeline Framework | Metrics | target_row_count | NOT NULL | Count of rows successfully written to target. |
+| Silver | si_audit_log | rows_rejected | Pipeline Framework | Metrics | error_row_count | NOT NULL | Count of rows sent to `si_error_log`. |
+| Silver | si_audit_log | run_by_user | Pipeline Framework | Metadata | service_account | NOT NULL | Value from pipeline execution context. |
+| Silver | si_audit_log | error_message | Pipeline Framework | Metadata | exception_message | - | Captured if the entire pipeline fails. |
+
+#### **Table: `si_error_log`**
+This governance table captures records that fail validation. It is populated by the ETL/ELT pipeline framework when a rule is violated.
+
+| Target Layer | Target Table | Target Field | Source Layer | Source Table | Source Field | Validation Rule | Transformation Rule |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Silver | si_error_log | error_id | Pipeline Framework | Metadata | - | NOT NULL; UNIQUE | `GENERATE_UUID()` |
+| Silver | si_error_log | pipeline_run_id | Pipeline Framework | Metadata | run_id | NOT NULL | Foreign key to `si_audit_log.pipeline_run_id`. |
+| Silver | si_error_log | error_timestamp | Pipeline Framework | Metadata | - | NOT NULL | `CURRENT_TIMESTAMP()` |
+| Silver | si_error_log | source_table | Pipeline Framework | Configuration | source_table_name | NOT NULL | Name of the source table being processed. |
+| Silver | si_error_log | target_table | Pipeline Framework | Configuration | target_table_name | NOT NULL | Name of the intended target table. |
+| Silver | si_error_log | record_identifier | Bronze | (Any) | Primary Key | NOT NULL | The primary key value(s) of the failed source record. |
+| Silver | si_error_log | column_name | Pipeline Framework | Validation Logic | column_name | NOT NULL | The name of the column that failed validation. |
+| Silver | si_error_log | failed_rule | Pipeline Framework | Validation Logic | rule_name | NOT NULL | The name of the validation rule that failed (e.g., 'NOT_NULL', 'REGEX_MISMATCH'). |
+| Silver | si_error_log | error_description | Pipeline Framework | Validation Logic | error_message | NOT NULL | A descriptive message about the failure. |
+| Silver | si_error_log | erroneous_value | Bronze | (Any) | (Any) | - | The actual value from the source record that caused the failure. |
+| Silver | si_error_log | full_record_json | Bronze | (Any) | * | NOT NULL | `TO_JSON_STRING(source_record)` |
+
+---
+**API Cost Calculation**
+
+*   **Input Tokens:** The provided prompt, including all DDL scripts and instructions, is extensive. Estimated Input Tokens: 5,850.
+*   **Output Tokens:** The generated response, including the overview and all detailed mapping tables, is comprehensive. Estimated Output Tokens: 13,200.
+*   **Pricing Model Assumption (e.g., high-capability model):**
+    *   Input: $0.01 per 1,000 tokens
+    *   Output: $0.03 per 1,000 tokens
+*   **Calculation:**
+    *   Input Cost = (5850 / 1000) * $0.01 = 5.85 * $0.01 = $0.0585
+    *   Output Cost = (13200 / 1000) * $0.03 = 13.2 * $0.03 = $0.396
+    *   Total Cost = $0.0585 + $0.396 = $0.4545
+
+**Cost Consumed by API Call:** $0.4545 USD
