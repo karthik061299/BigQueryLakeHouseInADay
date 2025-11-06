@@ -1,0 +1,79 @@
+### 1. Data Expectations
+
+1.  **Completeness:**
+    *   All applications must have an associated `Application Date`, `Applicant ID`, `Card Product ID`, and `Acquisition Channel ID`.
+    *   Every approved application should eventually have an `Approval Date`.
+    *   Activated cards must have an `Activation Date`.
+    *   Transactions must be linked to a `Cardholder ID` and include a `Transaction Date` and `Transaction Amount`.
+    *   Campaign-related applications must have a `Campaign ID`.
+
+2.  **Accuracy:**
+    *   `Application Date`, `Approval Date`, `Activation Date`, and `Transaction Date` must be accurate and reflect the actual event timestamps.
+    *   `Marketing Cost` for campaigns must be recorded accurately to ensure correct ROI calculations.
+    *   `Credit Score` and `Transaction Amount` must be precise numerical values.
+
+3.  **Format:**
+    *   All date fields (`Application Date`, `Approval Date`, `Activation Date`, `Start Date`, `End Date`, `Check Execution Date`, `Transaction Date`) must adhere to a consistent format (e.g., `YYYY-MM-DD`).
+    *   Categorical fields like `Application Outcome`, `Risk Tier`, `Channel Name`, and `Campaign Type` should use a predefined set of values (e.g., 'Approved', 'Rejected' for `Application Outcome`).
+
+4.  **Consistency:**
+    *   The `Applicant ID` must be consistent across the `Application` and `Credit Risk` entities to ensure proper linkage.
+    *   The `Application Outcome` must be consistent with the presence or absence of an `Approval Date`. An 'Approved' application must have an `Approval Date`.
+    *   The `Fraud Screening Result` in the `Application` entity must be consistent with the detailed outcomes in the `Fraud Check` entity.
+
+### 2. Constraints
+
+1.  **Mandatory Fields (NOT NULL):**
+    *   **Application:** `Application ID`, `Applicant ID`, `Card Product ID`, `Channel ID`, `Application Date`, `Application Outcome`.
+    *   **Applicant:** `Applicant ID`.
+    *   **Card Product:** `Card Product ID`, `Product Name`.
+    *   **Acquisition Channel:** `Channel ID`, `Channel Name`.
+    *   **Campaign:** `Campaign ID`, `Campaign Name`, `Start Date`, `End Date`.
+    *   **Credit Risk:** `Applicant ID`, `Credit Score`, `Risk Tier`.
+    *   **Fraud Check:** `Application ID`, `Fraud Check Type`, `Check Execution Date`, `Screening Result`.
+    *   **Transaction:** `Transaction ID`, `Cardholder ID`, `Transaction Date`, `Transaction Amount`.
+
+2.  **Uniqueness (UNIQUE):**
+    *   `Application ID` must be unique in the `Application` table.
+    *   `Applicant ID` must be unique in the `Applicant` table.
+    *   `Card Product ID` must be unique in the `Card Product` table.
+    *   `Channel ID` must be unique in the `Acquisition Channel` table.
+    *   `Campaign ID` must be unique in the `Campaign` table.
+    *   `Transaction ID` must be unique in the `Transaction` table.
+
+3.  **Data Type Limitations:**
+    *   Date fields must be of `DATE` or `TIMESTAMP` data type.
+    *   `Credit Score` and `Transaction Amount` must be `NUMERIC` or `FLOAT`.
+    *   `Marketing Cost` must be `NUMERIC` or `FLOAT`.
+    *   Identifier fields (`Application ID`, `Applicant ID`, etc.) should be `STRING` or `INTEGER`.
+
+4.  **Referential Integrity (Informational Constraints in BigQuery):**
+    *   `Application.Applicant ID` must reference a valid `Applicant.Applicant ID`.
+    *   `Application.Card Product ID` must reference a valid `Card Product.Card Product ID`.
+    *   `Application.Channel ID` must reference a valid `Acquisition Channel.Channel ID`.
+    *   `Application.Campaign ID` can be nullable but if present, must reference a valid `Campaign.Campaign ID`.
+    *   `Application.Fraud Check ID` must reference a valid `Fraud Check.Application ID`.
+    *   `Application.Transaction ID` must reference a valid `Transaction.Cardholder ID`.
+    *   `Credit Risk.Applicant ID` must reference a valid `Applicant.Applicant ID`.
+
+### 3. Business Rules
+
+1.  **Application Funnel Logic:**
+    *   An application's status progresses from submitted to approved/rejected, and then to activated.
+    *   `Approval Date` must be on or after `Application Date`.
+    *   `Activation Date` must be on or after `Approval Date`.
+    *   `Time to First Transaction` is calculated as the difference between `Transaction Date` and `Activation Date`.
+
+2.  **KPI Calculation Logic:**
+    *   **Approval Rate:** (Count of 'Approved' applications / Total applications) * 100.
+    *   **Activation Rate:** (Count of activated cards / Count of 'Approved' applications) * 100.
+    *   **Average Time to Approval:** Average of (`Approval Date` - `Application Date`) for all approved applications.
+    *   **Cost per Acquisition (CPA):** `Marketing Cost` / Number of acquired customers (approved and activated applications) from that campaign.
+    *   **Campaign ROI:** ((Revenue from acquired customers - `Marketing Cost`) / `Marketing Cost`) * 100.
+    *   **Fraud Detection Rate:** (Number of correctly identified fraudulent applications / Total actual fraudulent applications) * 100.
+
+3.  **Data Transformation and Processing:**
+    *   Applicant `Age Group` and `Income Level` must be derived from raw applicant data based on predefined bucketing rules.
+    *   `Risk Tier` in the `Credit Risk` entity is determined by mapping `Credit Score` ranges to specific tiers (e.g., Score > 750 = 'Low Risk').
+    *   An application is considered part of a campaign if the `Application Date` falls between the campaign's `Start Date` and `End Date`.
+    *   An `Inactive Card` is a card that has been approved and activated but has no transaction within a specified period (e.g., 90 days) after the `Activation Date`.
