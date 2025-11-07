@@ -1,0 +1,90 @@
+1.Domain Overview
+The business domain is Credit Card Acquisition. The reports are designed to monitor and optimize the entire process, from a customer applying for a credit card to their first transaction. This includes tracking the application funnel, evaluating marketing campaign performance, assessing credit risk, detecting fraud, and analyzing initial customer engagement.
+
+2.List of Entity Name with a description
+1.  **Application:** Represents a customer's application for a credit card.
+2.  **Applicant:** Represents the individual applying for the credit card.
+3.  **Card Product:** Represents the different types of credit cards offered.
+4.  **Acquisition Channel:** Represents the various channels through which customers apply for a credit card.
+5.  **Campaign:** Represents marketing campaigns aimed at acquiring new customers.
+6.  **Credit Risk:** Represents the creditworthiness of an applicant.
+7.  **Fraud Check:** Represents the fraud screening process for an application.
+8.  **Transaction:** Represents the first transaction made by a new cardholder.
+
+3.List of Attributes for each Entity with a description for each attribute
+1.  **Application**
+    *   Application Date: The date the application was submitted.
+    *   Approval Date: The date the application was approved.
+    *   Activation Date: The date the card was activated.
+    *   Application Outcome: The final status of the application (e.g., Approved, Rejected).
+    *   Fraud Screening Result: The outcome of the fraud screening process.
+2.  **Applicant**
+    *   Geography: The geographical location of the applicant.
+    *   Age Group: The age range of the applicant.
+    *   Income Level: The income bracket of the applicant.
+    *   Employment Type: The employment status of the applicant.
+3.  **Card Product**
+    *   Product Name: The name of the credit card product.
+4.  **Acquisition Channel**
+    *   Channel Name: The name of the acquisition channel (e.g., Online, In-branch).
+5.  **Campaign**
+    *   Campaign Name: The name of the marketing campaign.
+    *   Campaign Type: The type of the campaign (e.g., Digital, Direct Mail).
+    *   Start Date: The start date of the campaign.
+    *   End Date: The end date of the campaign.
+    *   Marketing Cost: The cost associated with the campaign.
+6.  **Credit Risk**
+    *   Credit Score: The credit score of the applicant.
+    *   Risk Tier: The risk category assigned to the applicant based on their credit score.
+7.  **Fraud Check**
+    *   Fraud Check Type: The type of fraud check performed.
+    *   Check Execution Date: The date the fraud check was executed.
+    *   Screening Result: The result of the fraud screening.
+8.  **Transaction**
+    *   Transaction Date: The date of the first transaction.
+    *   Transaction Amount: The amount of the first transaction.
+    *   Promotional Offer Detail: Details of any promotional offer associated with the transaction.
+
+4.KPI List
+1.  Approval Rate
+2.  Activation Rate
+3.  Average Time to Approval
+4.  Drop-off Rate
+5.  Cost per Acquisition
+6.  Campaign ROI
+7.  Conversion Rate
+8.  Average Credit Score
+9.  Decline Rate
+10. Fraud Detection Rate
+11. False Positive Rate
+12. Manual Escalation Rate
+13. Clearance Rate
+14. Time to First Transaction
+15. Inactive Card Rate
+16. Average First Transaction Amount
+
+5.Conceptual Data Model Diagram in tabular form by one table is having a relationship with other table by which key field
+| From Table | To Table | Relationship Key |
+| :--- | :--- | :--- |
+| Application | Applicant | Applicant ID |
+| Application | Card Product | Card Product ID |
+| Application | Acquisition Channel | Channel ID |
+| Application | Campaign | Campaign ID |
+| Application | Credit Risk | Applicant ID |
+| Application | Fraud Check | Application ID |
+| Application | Transaction | Cardholder ID |
+
+6.Common Data Elements in Report Requirements
+1.  Application Date
+2.  Activation Date
+3.  Acquisition Channel
+4.  Card Product
+5.  Applicant Geography
+6.  Applicant Age Group
+7.  Applicant Income Level
+8.  Credit Score
+9.  Application Outcome
+10. Campaign Name
+11. Fraud Check Type
+12. Transaction Date
+13. Transaction Amount
